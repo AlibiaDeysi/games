@@ -365,22 +365,33 @@ function draw(now, prog) {
 
 /* ---- som: tudo sintetizado, sem arquivos ---- */
 let AC = null, muted = false;
-let keep = null;
-function keepAlive() {   // faz o celular tocar os sons mesmo no modo silencioso (iPhone) e mantém o áudio ativo
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+let OUT = null, strEl = null, strOk = false;
+const audio = () => {
   try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
-  if (keep) return;
-  const n = 8000, b = new Uint8Array(44 + n), d = new DataView(b.buffer), w = (o, t) => { for (let k = 0; k < t.length; k++) b[o + k] = t.charCodeAt(k); };
-  w(0, "RIFF"); d.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
-  d.setUint32(24, 8000, true); d.setUint32(28, 8000, true); d.setUint16(32, 1, true); d.setUint16(34, 8, true); w(36, "data"); d.setUint32(40, n, true); b.fill(128, 44);
-  try { keep = new Audio(URL.createObjectURL(new Blob([b], { type: "audio/wav" }))); keep.loop = true; const pr = keep.play(); if (pr && pr.catch) pr.catch(() => { keep = null; }); } catch (e) { keep = null; }
-}
-const audio = () => { keepAlive(); if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (AC && AC.state === "suspended") AC.resume(); return AC; };
+  if (!AC) {
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      OUT = AC.createGain(); OUT.gain.value = IOS ? 1.6 : 1;
+      if (IOS && AC.createMediaStreamDestination) {   // iPhone: sai por um <audio>, que toca até no modo silencioso
+        const dest = AC.createMediaStreamDestination(); OUT.connect(dest);
+        strEl = new Audio(); strEl.srcObject = dest.stream; strEl.setAttribute("playsinline", "");
+        setTimeout(() => { if (!strOk) { try { OUT.connect(AC.destination); } catch (e) {} } }, 2500);
+      } else OUT.connect(AC.destination);
+    } catch (e) {}
+  }
+  if (AC) {
+    if (AC.state !== "running") { try { AC.resume(); } catch (e) {} }
+    if (strEl && !strOk) { const pr = strEl.play(); if (pr && pr.then) pr.then(() => { strOk = true; }, () => {}); }
+  }
+  return AC;
+};
 function tone(f, t0, d, type, vol) {
   if (!AC || muted) return;
   const o = AC.createOscillator(), gn = AC.createGain();
   o.type = type || "square"; o.frequency.value = f;
   gn.gain.setValueAtTime(vol || .06, t0); gn.gain.exponentialRampToValueAtTime(.0001, t0 + d);
-  o.connect(gn); gn.connect(AC.destination); o.start(t0); o.stop(t0 + d + .02);
+  o.connect(gn); gn.connect(OUT); o.start(t0); o.stop(t0 + d + .02);
 }
 const seq = (fs, gap, d, type, vol) => fs.forEach((f, k) => tone(f, AC.currentTime + k * gap, d, type, vol));
 const sfx = {
@@ -770,7 +781,7 @@ function reiniciar() {
   padEl.style.display = "none"; inicio();
 }
 function encerrar() {
-  mode = "closed"; held = null; if (keep) { try { keep.pause(); } catch (e) {} } if (AC) { try { AC.close(); } catch (e) {} AC = null; }
+  mode = "closed"; held = null; if (strEl) { try { strEl.pause(); } catch (e) {} } if (AC) { try { AC.close(); } catch (e) {} AC = null; }
   document.querySelector(".map").style.display = "none"; padEl.style.display = "none";
   $.innerHTML = '<div><img class="foto" src="' + FOTO + '" alt=""> ❤️ <img class="foto" src="' + FOTO2 + '" alt=""></div><h1>Até a próxima aventura 💖</h1><p>Sempre é um prazer celebrar o seu dia!</p><p class="mut">Feito com amor por ' + esc(FEITO_POR) + '</p>' +
   '<p class="mut" style="margin-top:14px">🎵 Day 1 — HONNE</p>' +
